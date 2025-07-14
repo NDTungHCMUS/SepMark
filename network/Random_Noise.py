@@ -1,14 +1,24 @@
 from . import *
-from .noise_layers import *
-
-
+# from .noise_layers import *
+from .noise_layers.identity import Identity
+from .noise_layers.kornia_noises import GaussianNoiseEditGuard
+from .noise_layers.jpeg_EditGuard import DiffJPEG
+from .noise_layers.poisson import PoissonNoise
 class Random_Noise(nn.Module):
 
     def __init__(self, layers, len_layers_R, len_layers_F):
         super(Random_Noise, self).__init__()
-        for i in range(len(layers)):
-            layers[i] = eval(layers[i])
-        self.noise = nn.Sequential(*layers)
+        # for i in range(len(layers)):
+        #     layers[i] = eval(layers[i])
+        # self.noise = nn.Sequential(*layers)
+
+        # self.noise = Identity()
+
+        # self.noise = GaussianNoiseEditGuard(noisesigma=1)
+
+        # self.noise = DiffJPEG(differentiable=True, quality=50)
+
+        self.noise = PoissonNoise()
         self.len_layers_R = len_layers_R
         self.len_layers_F = len_layers_F
         print(self.noise)

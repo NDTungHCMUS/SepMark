@@ -38,7 +38,7 @@ def get_path(path="temp/"):
 
 
 def main():
-
+    os.makedirs('temp', exist_ok=True)
     seed_torch(42)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -76,9 +76,9 @@ def main():
     network.load_model_ed(EC_path)
 
     if noise_layer[0:len("StarGAN")] != "StarGAN":
-        test_dataset = maskImgDataset(os.path.join(dataset_path, "test_256"), image_size)
+        test_dataset = maskImgDataset(dataset_path, image_size)
     else:
-        test_dataset = attrsImgDataset(os.path.join(dataset_path, "test_256"), image_size, "celebahq")
+        test_dataset = attrsImgDataset(dataset_path, image_size, "celebahq")
 
     test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=True)
 
@@ -87,21 +87,30 @@ def main():
     test_result = {
         "error_rate_C": 0.0,
         "error_rate_RF": 0.0,
+        "bit_accuracy_C": 0.0,
+        "bit_accuracy_RF": 0.0,
         "psnr": 0.0,
         "ssim": 0.0,
-        "lpips": 0.0
+        "lpips": 0.0,
+        "embed_time": 0.0,
+        "decode_time_C": 0.0,
+        "decode_time_RF": 0.0
     }
 
     saved_iterations = np.random.choice(np.arange(1, len(test_dataloader)+1), size=save_images_number, replace=False)
     saved_all = None
+    
+    # Counter for total number of images processed
+    total_images = 0
 
+    print("Start for looop ==========")
     for step, (image, mask) in enumerate(test_dataloader, 1):
         image = image.to(device)
         message = torch.Tensor(np.random.choice([-message_range, message_range], (image.shape[0], message_length))).to(device)
 
         '''
-		test
-		'''
+        test
+        '''
         network.encoder_decoder.eval()
         network.discriminator.eval()
 
@@ -109,8 +118,14 @@ def main():
             # use device to compute
             images, messages, masks = image.to(network.device), message.to(network.device), mask.to(network.device)
 
+            # Measure embedding time
+            embed_start_time = time.time()
             encoded_images = network.encoder_decoder.module.encoder(images, messages)
             encoded_images = images + (encoded_images - images) * strength_factor
+            torch.cuda.synchronize()  # Ensure GPU operations are complete
+            embed_end_time = time.time()
+            embed_time_batch = embed_end_time - embed_start_time
+            embed_time_per_image = embed_time_batch / images.shape[0]
 
             transform = transforms.Compose([
                 transforms.ToTensor(),
@@ -159,26 +174,54 @@ def main():
                 noised_images[index] = transform(read).unsqueeze(0).to(image.device)
             ##################################################################
 
+            # Measure decoding time for decoder C
+            decode_start_time_C = time.time()
             decoded_messages_C = network.encoder_decoder.module.decoder_C(noised_images)
+            torch.cuda.synchronize()  # Ensure GPU operations are complete
+            decode_end_time_C = time.time()
+            decode_time_C_batch = decode_end_time_C - decode_start_time_C
+            decode_time_C_per_image = decode_time_C_batch / images.shape[0]
+
+            # Measure decoding time for decoder RF
+            decode_start_time_RF = time.time()
             decoded_messages_RF = network.encoder_decoder.module.decoder_RF(noised_images)
+            torch.cuda.synchronize()  # Ensure GPU operations are complete
+            decode_end_time_RF = time.time()
+            decode_time_RF_batch = decode_end_time_RF - decode_start_time_RF
+            decode_time_RF_per_image = decode_time_RF_batch / images.shape[0]
 
         '''
-		decoded message error rate
-		'''
+        decoded message error rate
+        '''
         error_rate_C = network.decoded_message_error_rate_batch(messages, decoded_messages_C)
         error_rate_RF = network.decoded_message_error_rate_batch(messages, decoded_messages_RF)
 
+        # Calculate bit accuracy (1 - error_rate)
+        bit_accuracy_C = 1.0 - error_rate_C
+        bit_accuracy_RF = 1.0 - error_rate_RF
+
         result = {
-            "error_rate_C": error_rate_C,
-            "error_rate_RF": error_rate_RF,
-            "psnr": psnr,
-            "ssim": ssim,
-            "lpips": lpips
-        }
+                "error_rate_C": error_rate_C,
+                "error_rate_RF": error_rate_RF,
+                "bit_accuracy_C": bit_accuracy_C,
+                "bit_accuracy_RF": bit_accuracy_RF,
+                "psnr": psnr,
+                "ssim": ssim,
+                "lpips": lpips,
+                "embed_time": embed_time_per_image,
+                "decode_time_C": decode_time_C_per_image,
+                "decode_time_RF": decode_time_RF_per_image
+            }
 
+        # Accumulate results (multiply by batch size to get total time for averaging later)
         for key in result:
-            test_result[key] += float(result[key])
+            if "time" in key:
+                test_result[key] += float(result[key]) * images.shape[0]
+            else:
+                test_result[key] += float(result[key])
 
+        # Update total image count
+        total_images += images.shape[0]
 
         if step in saved_iterations:
             if saved_all is None:
@@ -187,11 +230,14 @@ def main():
                 saved_all = concatenate_images(saved_all, image, encoded_images, noised_images)
 
         '''
-		test results
-		'''
-        content = "Image " + str(step) + " : \n"
-        for key in test_result:
-            content += key + "=" + str(result[key]) + ","
+        test results
+        '''
+        content = "Batch " + str(step) + f" ({images.shape[0]} images) : \n"
+        for key in result:
+            if "time" in key:
+                content += key + "=" + str(f"{result[key]:.8f}") + "s/image,"
+            else:
+                content += key + "=" + str(f"{result[key]:.8f}") + ","
             writer.add_scalar("Test/" + key, float(result[key]), step)
         content += "\n"
 
@@ -201,19 +247,45 @@ def main():
         print(content)
 
     '''
-	test results
-	'''
-    content = "Average : \n"
+    test results
+    '''
+    content = "Average per image : \n"
     for key in test_result:
-        content += key + "=" + str(test_result[key] / step) + ","
-        writer.add_scalar("Test_epoch/" + key, float(test_result[key] / step), 1)
+        if "time" in key:
+            avg_value = test_result[key] / total_images
+            content += key + "=" + str(f"{avg_value:.8f}") + "s/image,"
+        else:
+            avg_value = test_result[key] / step
+            content += key + "=" + str(f"{avg_value:.8f}") + ","
+        writer.add_scalar("Test_epoch/" + key, float(avg_value), 1)
     content += "\n"
-
+    
+    # Additional timing statistics per image
+    avg_embed_time = test_result["embed_time"] / total_images
+    avg_decode_time_C = test_result["decode_time_C"] / total_images
+    avg_decode_time_RF = test_result["decode_time_RF"] / total_images
+    
+    timing_summary = f"\n=== TIMING SUMMARY (PER IMAGE) ===\n"
+    timing_summary += f"Total images processed: {total_images}\n"
+    timing_summary += f"Average Embedding Time: {avg_embed_time:.8f}s per image\n"
+    timing_summary += f"Average Decoding Time (C): {avg_decode_time_C:.8f}s per image\n"
+    timing_summary += f"Average Decoding Time (RF): {avg_decode_time_RF:.8f}s per image\n"
+    timing_summary += f"Total Average Processing Time: {avg_embed_time + avg_decode_time_C + avg_decode_time_RF:.8f}s per image\n"
+    timing_summary += f"Images per Second (Embedding): {1.0 / avg_embed_time:.5f}\n"
+    timing_summary += f"Images per Second (Decoding C): {1.0 / avg_decode_time_C:.5f}\n"
+    timing_summary += f"Images per Second (Decoding RF): {1.0 / avg_decode_time_RF:.5f}\n"
+    timing_summary += f"Total Images per Second: {1.0 / (avg_embed_time + avg_decode_time_C + avg_decode_time_RF):.5f}\n"
+    timing_summary += "========================================\n"
+    
+    print("KEt qua cuoi cung:", content)
+    print(timing_summary)
+    
     with open(test_log, "a") as file:
         file.write(content)
+        file.write(timing_summary)
 
     print(content)
-    save_images(saved_all, "test", result_folder + "images/", resize_to=None)
+    # save_images(saved_all, "test", result_folder + "images/", resize_to=None)
 
     writer.close()
 

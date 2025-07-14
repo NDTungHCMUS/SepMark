@@ -1,7 +1,51 @@
 import torch.nn as nn
 import kornia
 import numpy as np
+import torch
 # Kornia based noises
+
+class GaussianNoiseEditGuard(nn.Module):
+    """
+    Gaussian noise layer adapted from EditGuard implementation.
+    """
+    
+    def __init__(self, noisesigma=25.5):
+        """
+        Initialize Gaussian noise layer.
+        
+        Args:
+            noisesigma (float): Noise sigma parameter (default: 25.5)
+        """
+        super(GaussianNoiseEditGuard, self).__init__()
+        self.noisesigma = noisesigma
+        
+    def forward(self, image_cover_mask):
+        """
+        Apply Gaussian noise to the input image.
+        
+        Args:
+            image_cover_mask (list): [encoded_image, cover_image, mask]
+        
+        Returns:
+            torch.Tensor: Noisy image
+        """
+        # Extract the encoded image (first element)
+        y_forw = image_cover_mask[0]
+        
+        # Calculate noise level
+        NL = self.noisesigma / 255.0
+        
+        # Generate Gaussian noise
+        noise = np.random.normal(0, NL, y_forw.shape)
+        
+        # Convert to torch tensor and move to GPU
+        torchnoise = torch.from_numpy(noise).cuda().float()
+        
+        # Add noise to the image
+        y_forw = y_forw + torchnoise
+        
+        return y_forw
+
 
 
 # intensity
