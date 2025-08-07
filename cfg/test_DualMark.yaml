@@ -1,11 +1,17 @@
-result_folder: 128_128_Gaussian_Noise_30/
+result_folder: 128_with_30_bits/
 model_epoch: 99
 batch_size: 1
 with_mask: true
 strength_factor: 1
 # noise_layer: DiffJPEG(differentiable=True, quality=50)
 # noise_layer: GaussianNoiseEditGuard(noisesigma=1)
-noise_layer: PoissonNoise()
+# noise_layer: PoissonNoise()
+# noise_layer: AdversarialEmbedding(encoder="klvae8", strength = 2,  device=torch.device("cuda:0"),
+#                         eps_factor=1/255,
+#                         alpha_factor=0.05,
+#                         n_steps=40)
+
+noise_layer: SDInpaint(image_size=128)
 
 # Identity()/JpegTest()/Resize()/GaussianBlur()/MedianBlur()/Brightness()/Contrast()/Saturation()/Hue()/FaceCrop()/FaceCropout()/Dropout()/SaltPepper()/GaussianNoise()
 # FaceErase()/FaceEraseout()/SimSwap()/FaceSwap()/GANimation()/StarGAN()
