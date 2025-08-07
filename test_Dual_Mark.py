@@ -8,6 +8,7 @@ import os
 import time
 from shutil import copyfile
 from network.noise_layers import *
+from network.noise_layers.adversarial import *
 from PIL import Image
 import random, string
 import os
@@ -39,6 +40,7 @@ def get_path(path="temp/"):
 
 def main():
     os.makedirs('temp', exist_ok=True)
+    os.makedirs('noised_images', exist_ok=True)
     seed_torch(42)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -97,8 +99,8 @@ def main():
         "decode_time_RF": 0.0
     }
 
-    saved_iterations = np.random.choice(np.arange(1, len(test_dataloader)+1), size=save_images_number, replace=False)
-    saved_all = None
+    # saved_iterations = np.random.choice(np.arange(1, len(test_dataloader)+1), size=save_images_number, replace=False)
+    # saved_all = None
     
     # Counter for total number of images processed
     total_images = 0
@@ -157,8 +159,24 @@ def main():
             #noised_images_C, noised_images_R, noised_images_F = network.encoder_decoder.module.noise([encoded_images, images, masks])
             #network.encoder_decoder.module.noise.train()
             #_, _, noised_images = network.encoder_decoder.module.noise([encoded_images, images, masks])
-            noised_images = eval(noise_layer)([encoded_images.clone(), images, masks])
+            with torch.enable_grad():
+                # noised_images = eval(noise_layer)([encoded_images.clone(), images, masks])
+                noised_images = eval(noise_layer)([encoded_images.clone(), images, masks], image_id=step)
             #noised_images = eval('JpegTest()')([noised_images.clone(), images, masks])
+
+
+            ####################################################################
+            for index in range(noised_images.shape[0]):
+                # Convert tensor to PIL Image
+                single_noised_image = ((noised_images[index].clamp(-1, 1).permute(1, 2, 0) + 1) / 2 * 255).add(0.5).clamp(0,255).to('cpu', torch.uint8).numpy()
+                im_noised = Image.fromarray(single_noised_image)
+                
+                # Save the noised image with a descriptive filename
+                noised_filename = f"noised_images/step_{step:04d}_batch_{index:02d}_{noise_layer}.png"
+                im_noised.save(noised_filename)
+                print(f"Saved noised image: {noised_filename}")
+            ####################################################################
+
 
             ##################################################################
             for index in range(noised_images.shape[0]):
@@ -223,11 +241,11 @@ def main():
         # Update total image count
         total_images += images.shape[0]
 
-        if step in saved_iterations:
-            if saved_all is None:
-                saved_all = get_random_images(image, encoded_images, noised_images)
-            else:
-                saved_all = concatenate_images(saved_all, image, encoded_images, noised_images)
+        # if step in saved_iterations:
+        #     if saved_all is None:
+        #         saved_all = get_random_images(image, encoded_images, noised_images)
+        #     else:
+        #         saved_all = concatenate_images(saved_all, image, encoded_images, noised_images)
 
         '''
         test results
