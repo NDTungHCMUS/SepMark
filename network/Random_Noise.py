@@ -4,6 +4,8 @@ from .noise_layers.identity import Identity
 from .noise_layers.kornia_noises import GaussianNoiseEditGuard
 from .noise_layers.jpeg_EditGuard import DiffJPEG
 from .noise_layers.poisson import PoissonNoise
+from .noise_layers.adversarial.embedding import AdversarialEmbedding
+from .noise_layers.sd_inpaint import SDInpaintConfigurable, SDInpaint
 class Random_Noise(nn.Module):
 
     def __init__(self, layers, len_layers_R, len_layers_F):
@@ -18,7 +20,14 @@ class Random_Noise(nn.Module):
 
         # self.noise = DiffJPEG(differentiable=True, quality=50)
 
-        self.noise = PoissonNoise()
+        # self.noise = PoissonNoise()
+
+        # self.noise = AdversarialEmbedding(encoder="klvae8", strength=2, device=torch.device("cuda:0"),
+        #                                   eps_factor=1 / 255,
+        #                                   alpha_factor=0.05,
+        #                                   n_steps=40)
+
+        self.noise = SDInpaint(image_size=128)
         self.len_layers_R = len_layers_R
         self.len_layers_F = len_layers_F
         print(self.noise)

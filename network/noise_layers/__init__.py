@@ -17,6 +17,8 @@ from .jpeg import JpegTest
 from .kornia_noises import GaussianNoiseEditGuard, GaussianBlur, GaussianNoise, MedianBlur, Brightness, Contrast, Saturation, Hue, Rotation, Affine
 from .jpeg_EditGuard import DiffJPEG
 from .poisson import PoissonNoise
+from .adversarial.embedding import AdversarialEmbedding
+from .sd_inpaint import SDInpaintConfigurable, SDInpaint
 ############################################
 # from .simswap.test_one_image import SimSwap
 # from network.noise_layers.faceswap.face_swap import FaceSwap
